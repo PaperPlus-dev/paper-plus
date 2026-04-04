@@ -27,8 +27,10 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [hasPaidForSciences, setHasPaidForSciences] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
 
- useEffect(() => {
+  useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setAuthLoading(false);
@@ -41,6 +43,7 @@ function App() {
             const data = userDoc.data();
             if (data.topicScores) setTopicScores(data.topicScores);
             if (data.sessionHistory) setSessionHistory(data.sessionHistory);
+            if (data.hasPaidForSciences) setHasPaidForSciences(true);
           }
         } catch (err) {
           console.log("Error loading scores:", err);
@@ -51,6 +54,42 @@ function App() {
     });
     return unsub;
   }, []);
+
+  // Check for payment success in URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentStatus = urlParams.get('payment');
+    const sessionId = urlParams.get('session_id');
+
+    if (paymentStatus === 'success' && sessionId && user) {
+      setCheckingPayment(true);
+      fetch('https://paper-plus.onrender.com/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      })
+      .then(res => res.json())
+      .then(async (data) => {
+        if (data.paymentStatus === 'paid') {
+          // Update Firestore
+          const userRef = doc(db, "users", user.uid);
+          await setDoc(userRef, {
+            hasPaidForSciences: true,
+            paidAt: new Date().toISOString()
+          }, { merge: true });
+          setHasPaidForSciences(true);
+          alert('🎉 Payment successful! Sciences unlocked!');
+        }
+        setCheckingPayment(false);
+        // Clean up URL
+        window.history.replaceState({}, '', '/');
+      })
+      .catch(err => {
+        console.log('Payment verification error:', err);
+        setCheckingPayment(false);
+      });
+    }
+  }, [user]);
 
   const subjects = {
     Biology: { icon: "🧬", topics: ["Cell biology","Organisation","Bioenergetics","Infection & response","Homeostasis","Inheritance","Ecology"] },
@@ -84,7 +123,37 @@ function App() {
     setTopicScores({});
   }
 
+  async function unlockSciences() {
+    if (!user) {
+      alert('Please log in first');
+      return;
+    }
+
+    try {
+      const response = await fetch('https://paper-plus.onrender.com/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: user.uid,
+          userEmail: user.email 
+        })
+      });
+      
+      const { url } = await response.json();
+      window.location.href = url; // Redirect to Stripe checkout
+    } catch (error) {
+      console.error('Payment error:', error);
+      alert('Failed to start payment. Please try again.');
+    }
+  }
+
   function toggleSubject(name) {
+    // Lock sciences if not paid
+    if (!hasPaidForSciences && (name === 'Biology' || name === 'Chemistry' || name === 'Physics')) {
+      unlockSciences();
+      return;
+    }
+    
     setSelectedSubjects(prev =>
       prev.includes(name) ? prev.filter(s => s !== name) : [...prev, name]
     );
@@ -149,7 +218,7 @@ Respond in this exact JSON format with no markdown or extra text:
     generateQuestion();
   }
 
- async function nextQuestion() {
+  async function nextQuestion() {
     if (currentQ >= questionCount) {
       const newSession = {
         title: `${selectedSubjects.join(" + ")} — ${tier}`,
@@ -218,7 +287,6 @@ Respond in this exact JSON format with no markdown or extra text:
     }
   }
   
-
   const styles = {
     app: { fontFamily: "system-ui, sans-serif", maxWidth: 480, margin: "0 auto", padding: "1rem", background: "#f8f8f6", minHeight: "100vh" },
     nav: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "1.5rem" },
@@ -334,12 +402,38 @@ Respond in this exact JSON format with no markdown or extra text:
         <div style={styles.cardTitle}>Choose your subjects</div>
         <div style={styles.cardSub}>Select one or more subjects for your paper.</div>
         <div style={styles.subjectGrid}>
-          {Object.entries(subjects).map(([name, data]) => (
-            <button key={name} style={styles.subjectBtn(selectedSubjects.includes(name))} onClick={() => toggleSubject(name)}>
-              <span style={styles.subjectIcon}>{data.icon}</span>
-              <div style={styles.subjectName}>{name}</div>
-            </button>
-          ))}
+          {Object.entries(subjects).map(([name, data]) => {
+            const isScience = name === 'Biology' || name === 'Chemistry' || name === 'Physics';
+            const isLocked = isScience && !hasPaidForSciences;
+            
+            return (
+              <button 
+                key={name} 
+                style={{
+                  ...styles.subjectBtn(selectedSubjects.includes(name)),
+                  opacity: isLocked ? 0.6 : 1,
+                  position: 'relative'
+                }} 
+                onClick={() => toggleSubject(name)}
+              >
+                <span style={styles.subjectIcon}>{data.icon}</span>
+                <div style={styles.subjectName}>
+                  {name}
+                  {isLocked && <span style={{ marginLeft: 4 }}>🔒</span>}
+                </div>
+                {isLocked && (
+                  <div style={{ 
+                    fontSize: 10, 
+                    color: '#185FA5', 
+                    marginTop: 4,
+                    fontWeight: 500
+                  }}>
+                    £9.99 to unlock
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
