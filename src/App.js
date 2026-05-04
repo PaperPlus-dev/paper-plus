@@ -182,9 +182,12 @@ function App() {
 
 CRITICAL FOR MATH QUESTIONS:
 - Show ALL calculation steps
-- Use FULL precision (do NOT round intermediate steps)
+- Use FULL precision (do NOT use decimals on intermediate steps for non-integers (only fractions))
 - Only round the FINAL answer to 1 decimal place
 - Double-check your arithmetic before responding
+
+CRITICAL FOR ANY QUESTIONS:
+- Do not repeat any previous questions
 
 Respond in this exact JSON format with no markdown or extra text:
 {
