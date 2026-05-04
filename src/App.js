@@ -180,6 +180,8 @@ function App() {
 
     const prompt = `You are a ${examBoard} GCSE ${subject} examiner. Generate a single hard exam question for the topic "${topic}" at ${tier} tier worth ${marks} marks.
 
+If the question involves calculations, make sure that no rounding occurs until the final answer. All working should be shown, and rounding should only be done at the final step. For non-calculation questions (e.g., theory or explanation), there should be no need to round.
+
 Respond in this exact JSON format with no markdown or extra text:
 {
   "subject": "${subject}",
