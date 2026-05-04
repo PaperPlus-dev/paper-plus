@@ -180,7 +180,10 @@ function App() {
 
     const prompt = `You are a ${examBoard} GCSE ${subject} examiner. Generate a single hard exam question for the topic "${topic}" at ${tier} tier worth ${marks} marks.
 
-If the question involves calculations, make sure that no rounding occurs until the final answer. All working should be shown, and rounding should only be done at the final step. For non-calculation questions (e.g., theory or explanation), there should be no need to round.
+In the solution:
+1. Do not round any intermediate values during the calculations. Keep full precision until the final answer.
+2. Only round the final answer to the required number of decimal places (e.g., 1 decimal place for angles, 2 decimal places for measurements, etc.).
+3. Provide the full mark scheme with the reasoning for each step.
 
 Respond in this exact JSON format with no markdown or extra text:
 {
