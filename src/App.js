@@ -27,8 +27,6 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [hasPaidForSciences, setHasPaidForSciences] = useState(false);
-  const [checkingPayment, setCheckingPayment] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -43,7 +41,6 @@ function App() {
             const data = userDoc.data();
             if (data.topicScores) setTopicScores(data.topicScores);
             if (data.sessionHistory) setSessionHistory(data.sessionHistory);
-            if (data.hasPaidForSciences) setHasPaidForSciences(true);
           }
         } catch (err) {
           console.log("Error loading scores:", err);
@@ -54,42 +51,6 @@ function App() {
     });
     return unsub;
   }, []);
-
-  // Check for payment success in URL
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const paymentStatus = urlParams.get('payment');
-    const sessionId = urlParams.get('session_id');
-
-    if (paymentStatus === 'success' && sessionId && user) {
-      setCheckingPayment(true);
-      fetch('https://paper-plus.onrender.com/verify-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId })
-      })
-      .then(res => res.json())
-      .then(async (data) => {
-        if (data.paymentStatus === 'paid') {
-          // Update Firestore
-          const userRef = doc(db, "users", user.uid);
-          await setDoc(userRef, {
-            hasPaidForSciences: true,
-            paidAt: new Date().toISOString()
-          }, { merge: true });
-          setHasPaidForSciences(true);
-          alert('🎉 Payment successful! Sciences unlocked!');
-        }
-        setCheckingPayment(false);
-        // Clean up URL
-        window.history.replaceState({}, '', '/');
-      })
-      .catch(err => {
-        console.log('Payment verification error:', err);
-        setCheckingPayment(false);
-      });
-    }
-  }, [user]);
 
   const subjects = {
     Biology: { icon: "🧬", topics: ["Cell biology","Organisation","Bioenergetics","Infection & response","Homeostasis","Inheritance","Ecology"] },
@@ -123,37 +84,7 @@ function App() {
     setTopicScores({});
   }
 
-  async function unlockSciences() {
-    if (!user) {
-      alert('Please log in first');
-      return;
-    }
-
-    try {
-      const response = await fetch('https://paper-plus.onrender.com/create-checkout-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: user.uid,
-          userEmail: user.email 
-        })
-      });
-      
-      const { url } = await response.json();
-      window.location.href = url; // Redirect to Stripe checkout
-    } catch (error) {
-      console.error('Payment error:', error);
-      alert('Failed to start payment. Please try again.');
-    }
-  }
-
   function toggleSubject(name) {
-    // Lock sciences if not paid
-    if (!hasPaidForSciences && (name === 'Biology' || name === 'Chemistry' || name === 'Physics')) {
-      unlockSciences();
-      return;
-    }
-    
     setSelectedSubjects(prev =>
       prev.includes(name) ? prev.filter(s => s !== name) : [...prev, name]
     );
@@ -178,25 +109,81 @@ function App() {
     const topic = topicPool[Math.floor(Math.random() * topicPool.length)];
     const marks = [2, 3, 4, 5, 6][Math.floor(Math.random() * 5)];
 
-    const prompt = `You are a ${examBoard} GCSE ${subject} examiner. Generate a single hard exam question for the topic "${topic}" at ${tier} tier worth ${marks} marks.
+    const timestamp = Date.now();
+    const randomSeed = Math.random().toString(36).substring(7);
 
-CRITICAL FOR MATH QUESTIONS:
-- Show ALL calculation steps
-- Use FULL precision (do NOT use decimals on intermediate steps for non-integers (only fractions))
-- Only round the FINAL answer to 1 decimal place
-- Double-check your arithmetic before responding
+    const prompt = `You are an expert ${examBoard} GCSE ${subject} examiner with a PhD in ${subject === 'Maths' ? 'Mathematics' : subject}.
 
-CRITICAL FOR ANY QUESTIONS:
-- Do not repeat any previous questions
+TASK: Generate ONE unique, exam-style question for:
+- Subject: ${subject}
+- Topic: ${topic}
+- Tier: ${tier}
+- Exam Board: ${examBoard}
+- Marks: ${marks}
+- Unique ID: ${timestamp}-${randomSeed}
 
-Respond in this exact JSON format with no markdown or extra text:
+CRITICAL ACCURACY RULES:
+${subject === 'Maths' ? `
+FOR MATHEMATICS - ABSOLUTE PRECISION REQUIRED:
+1. Perform ALL calculations step-by-step using full precision
+2. DO NOT round ANY intermediate calculations
+3. ONLY round the final answer to 1 decimal place
+4. VERIFY your answer by working backwards
+5. For percentages: convert to decimal with full precision, then calculate
+6. For fractions: ensure fully simplified using GCD
+7. For algebra: substitute answer back into equation to verify
+8. State all units clearly
+9. If answer is a whole number, write it as X.0 for consistency
+
+EXAMPLE (CORRECT):
+Question: Calculate 15.7% of 452
+Working:
+- Convert 15.7% to decimal: 0.157
+- Multiply: 452 × 0.157 = 70.964
+- Round to 1dp: 71.0
+Answer: 71.0
+
+EXAMPLE (WRONG - DO NOT DO THIS):
+- Convert 15.7% to decimal: 0.16 (WRONG - too early rounding!)
+- Multiply: 452 × 0.16 = 72.32 (WRONG - cascading error!)
+` : `
+FOR SCIENCES - FACTUAL ACCURACY REQUIRED:
+1. Use ONLY verified, curriculum-accurate scientific facts
+2. Mark scheme must match official ${examBoard} mark schemes
+3. Use precise scientific terminology from ${examBoard} specification
+4. For calculations: use exact formulae, show all working
+5. For equations: ensure balanced and accurate
+`}
+
+UNIQUENESS REQUIREMENT:
+- Use unique numbers/values based on timestamp: ${timestamp}
+- Use different contexts and real-world scenarios
+- Vary difficulty within ${tier} tier standards
+- DO NOT use common textbook examples (e.g., avoid 15% of 452 if asked before)
+
+OUTPUT FORMAT - VALID JSON ONLY:
 {
   "subject": "${subject}",
   "topic": "${topic}",
   "marks": ${marks},
-  "question": "the full question text here",
-  "markscheme": ["mark point 1", "mark point 2", "mark point 3"]
-}`;
+  "question": "Complete question with all necessary context and data",
+  "markscheme": ["Mark point 1 (method)", "Mark point 2 (working)", "Mark point 3 (answer with units)"]
+}
+
+MARK SCHEME STRUCTURE:
+- First marks: method/formula (e.g., "Correct formula: A = πr²")
+- Middle marks: working shown (e.g., "Substitution: A = 3.14 × 5²")
+- Final mark: accurate answer with units (e.g., "Answer: 78.5 cm²")
+- TOTAL marks must equal ${marks}
+
+FINAL CHECK BEFORE RESPONDING:
+✓ Have I used full precision in ALL calculations?
+✓ Did I only round the FINAL answer?
+✓ Is my answer verified/checked?
+✓ Are units included?
+✓ Does mark scheme have exactly ${marks} mark points?
+
+Generate the question now:`;
 
     try {
       const response = await fetch("https://paper-plus.onrender.com/api/question", {
@@ -204,7 +191,7 @@ Respond in this exact JSON format with no markdown or extra text:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
+          max_tokens: 1500,
           messages: [{ role: "user", content: prompt }]
         })
       });
@@ -295,7 +282,7 @@ Respond in this exact JSON format with no markdown or extra text:
       }
     }
   }
-  
+
   const styles = {
     app: { fontFamily: "system-ui, sans-serif", maxWidth: 480, margin: "0 auto", padding: "1rem", background: "#f8f8f6", minHeight: "100vh" },
     nav: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "1.5rem" },
@@ -346,11 +333,39 @@ Respond in this exact JSON format with no markdown or extra text:
     authToggle: { fontSize: 13, color: "#888", textAlign: "center", marginTop: "1rem" },
     authLink: { color: "#185FA5", cursor: "pointer", marginLeft: 4 },
     errorMsg: { fontSize: 13, color: "#E24B4A", marginBottom: 10, textAlign: "center" },
+    contactBtn: { fontSize: 13, color: "#185FA5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" },
   };
 
   if (authLoading) return (
     <div style={{ ...styles.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ fontSize: 14, color: "#888" }}>Loading...</div>
+    </div>
+  );
+
+  if (page === "contact") return (
+    <div style={styles.app}>
+      <div style={styles.nav}>
+        <div style={styles.logo}>Paper<span style={styles.logoSpan}>Plus</span></div>
+        <button style={styles.navBtn} onClick={() => setPage(user ? "setup" : "login")}>← Back</button>
+      </div>
+      <div style={styles.card}>
+        <div style={{ ...styles.cardTitle, fontSize: 20, marginBottom: "1.5rem" }}>Contact Us</div>
+        <div style={{ marginBottom: "1.5rem" }}>
+          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: "0.5rem" }}>Email</div>
+          <a href="mailto:support@trypaperplus.org" style={{ fontSize: 15, color: "#185FA5", textDecoration: "none" }}>
+            support@trypaperplus.org
+          </a>
+        </div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: "0.5rem" }}>Phone</div>
+          <a href="tel:+447305161881" style={{ fontSize: 15, color: "#185FA5", textDecoration: "none" }}>
+            +44 7305 161881
+          </a>
+        </div>
+        <div style={{ marginTop: "2rem", fontSize: 13, color: "#888", lineHeight: 1.6 }}>
+          We typically respond within 24 hours. For urgent issues, please call us directly.
+        </div>
+      </div>
     </div>
   );
 
@@ -381,6 +396,13 @@ Respond in this exact JSON format with no markdown or extra text:
             <>Already have an account?<span style={styles.authLink} onClick={() => { setAuthMode("login"); setAuthError(""); }}>Log in</span></>
           )}
         </div>
+        <div style={{ textAlign: "center", marginTop: "1.5rem" }}>
+          <button style={styles.contactBtn} onClick={() => setPage("contact")}>Contact Us</button>
+        </div>
+        <div style={{ textAlign: "center", marginTop: "1rem", fontSize: 11, color: "#888" }}>
+          <a href="/privacy.html" target="_blank" style={{ color: "#185FA5", marginRight: 12, textDecoration: "none" }}>Privacy</a>
+          <a href="/terms.html" target="_blank" style={{ color: "#185FA5", textDecoration: "none" }}>Terms</a>
+        </div>
       </div>
     </div>
   );
@@ -390,6 +412,7 @@ Respond in this exact JSON format with no markdown or extra text:
       <div style={styles.nav}>
         <div style={styles.logo}>Paper<span style={styles.logoSpan}>Plus</span></div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button style={styles.navBtn} onClick={() => setPage("contact")}>Contact</button>
           <button style={styles.navBtn} onClick={() => setPage("dashboard")}>Dashboard</button>
           <button style={styles.navBtn} onClick={handleLogout}>Log out</button>
         </div>
@@ -409,40 +432,14 @@ Respond in this exact JSON format with no markdown or extra text:
 
       <div style={styles.card}>
         <div style={styles.cardTitle}>Choose your subjects</div>
-        <div style={styles.cardSub}>Select one or more subjects for your paper.</div>
+        <div style={styles.cardSub}>Select one or more subjects for your paper. All subjects are free!</div>
         <div style={styles.subjectGrid}>
-          {Object.entries(subjects).map(([name, data]) => {
-            const isScience = name === 'Biology' || name === 'Chemistry' || name === 'Physics';
-            const isLocked = isScience && !hasPaidForSciences;
-            
-            return (
-              <button 
-                key={name} 
-                style={{
-                  ...styles.subjectBtn(selectedSubjects.includes(name)),
-                  opacity: isLocked ? 0.6 : 1,
-                  position: 'relative'
-                }} 
-                onClick={() => toggleSubject(name)}
-              >
-                <span style={styles.subjectIcon}>{data.icon}</span>
-                <div style={styles.subjectName}>
-                  {name}
-                  {isLocked && <span style={{ marginLeft: 4 }}>🔒</span>}
-                </div>
-                {isLocked && (
-                  <div style={{ 
-                    fontSize: 10, 
-                    color: '#185FA5', 
-                    marginTop: 4,
-                    fontWeight: 500
-                  }}>
-                    £9.99 to unlock
-                  </div>
-                )}
-              </button>
-            );
-          })}
+          {Object.entries(subjects).map(([name, data]) => (
+            <button key={name} style={styles.subjectBtn(selectedSubjects.includes(name))} onClick={() => toggleSubject(name)}>
+              <span style={styles.subjectIcon}>{data.icon}</span>
+              <div style={styles.subjectName}>{name}</div>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -490,7 +487,10 @@ Respond in this exact JSON format with no markdown or extra text:
     <div style={styles.app}>
       <div style={styles.nav}>
         <div style={styles.logo}>Paper<span style={styles.logoSpan}>Plus</span></div>
-        <button style={styles.navBtn} onClick={() => setPage("setup")}>Exit</button>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button style={styles.navBtn} onClick={() => setPage("contact")}>Contact</button>
+          <button style={styles.navBtn} onClick={() => setPage("setup")}>Exit</button>
+        </div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <span style={{ fontSize: 13, color: "#888" }}>Question {currentQ} of {questionCount}</span>
@@ -518,6 +518,18 @@ Respond in this exact JSON format with no markdown or extra text:
             </div>
             {msVisible && (
               <div style={styles.msSection}>
+                <div style={{ 
+                  fontSize: 12, 
+                  color: "#856404", 
+                  background: "#FFF3CD", 
+                  padding: "10px 12px", 
+                  borderRadius: 6,
+                  marginBottom: "1rem",
+                  border: "1px solid #FFE69C",
+                  lineHeight: 1.5
+                }}>
+                  <strong>⚠️ Accuracy Notice:</strong> This mark scheme is AI-generated and may contain occasional errors. Always verify answers with your textbook, teacher, or official exam board materials. Report errors to <a href="mailto:support@trypaperplus.org" style={{ color: "#856404", fontWeight: 500 }}>support@trypaperplus.org</a>
+                </div>
                 <div style={styles.msTitle}>Mark scheme</div>
                 {question.markscheme.map((point, i) => (
                   <div key={i} style={styles.msPoint}><span style={styles.msTick}>✓</span><span>{point}</span></div>
@@ -541,6 +553,7 @@ Respond in this exact JSON format with no markdown or extra text:
       <div style={styles.nav}>
         <div style={styles.logo}>Paper<span style={styles.logoSpan}>Plus</span></div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button style={styles.navBtn} onClick={() => setPage("contact")}>Contact</button>
           <button style={styles.navBtn} onClick={() => setPage("setup")}>New paper</button>
           <button style={styles.navBtn} onClick={handleLogout}>Log out</button>
         </div>
