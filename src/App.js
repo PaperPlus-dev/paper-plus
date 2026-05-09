@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile } from "firebase/auth";
+import { useNavigate, useLocation } from 'react-router-dom';
 
 function App() {
   const [page, setPage] = useState("login");
@@ -27,6 +28,38 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Sync URL with page state
+  useEffect(() => {
+    const path = location.pathname;
+    if (path === '/login' || path === '/') {
+      if (user) navigate('/setup');
+      else setPage('login');
+    } else if (path === '/setup' || path === '/new-paper') {
+      if (!user) navigate('/login');
+      else setPage('setup');
+    } else if (path === '/quiz' || path === '/questions') {
+      if (!user) navigate('/login');
+      else setPage('quiz');
+    } else if (path === '/dashboard') {
+      if (!user) navigate('/login');
+      else setPage('dashboard');
+    } else if (path === '/contact') {
+      setPage('contact');
+    }
+  }, [location, user, navigate]);
+
+  // Update URL when page changes
+  useEffect(() => {
+    if (page === 'login') navigate('/login', { replace: true });
+    else if (page === 'setup') navigate('/setup', { replace: true });
+    else if (page === 'quiz') navigate('/questions', { replace: true });
+    else if (page === 'dashboard') navigate('/dashboard', { replace: true });
+    else if (page === 'contact') navigate('/contact', { replace: true });
+  }, [page, navigate]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -127,21 +160,26 @@ ${subject === 'Maths' ? `
 FOR MATHEMATICS - ABSOLUTE PRECISION REQUIRED:
 1. Perform ALL calculations step-by-step using full precision
 2. DO NOT round ANY intermediate calculations
-3. ONLY round the final answer to 1 decimal place
+3. ONLY round the final answer to the nearest whole number and say "Round your answer to the nearest integer." at the end of every question
 4. VERIFY your answer by working backwards
 5. For percentages: convert to decimal with full precision, then calculate
 6. For fractions: ensure fully simplified using GCD
 7. For algebra: substitute answer back into equation to verify
 8. State all units clearly
-9. If answer is a whole number, write it as X.0 for consistency
+9. If answer is a whole number, write it as X for consistency
+10.NEVER round on intermediate steps (e.g. when doing cos(73)*72 do not do the calculation, keep it in exact form until the final step)
+11. Ensure all trigonometric ratios are correct
+12. After calculating, perform a 'sanity check' by re-calculating the final result using the inverse operation to see if it matches the original inputs
+
 
 EXAMPLE (CORRECT):
 Question: Calculate 15.7% of 452
 Working:
 - Convert 15.7% to decimal: 0.157
 - Multiply: 452 × 0.157 = 70.964
-- Round to 1dp: 71.0
-Answer: 71.0
+- Round to nearest integer: 71
+Answer: 71
+
 
 EXAMPLE (WRONG - DO NOT DO THIS):
 - Convert 15.7% to decimal: 0.16 (WRONG - too early rounding!)
@@ -153,6 +191,8 @@ FOR SCIENCES - FACTUAL ACCURACY REQUIRED:
 3. Use precise scientific terminology from ${examBoard} specification
 4. For calculations: use exact formulae, show all working
 5. For equations: ensure balanced and accurate
+6.For any calculations round to the nearest integer
+7. State "Round your answer to the nearest integer." at the end of every calculation question
 `}
 
 UNIQUENESS REQUIREMENT:
@@ -160,6 +200,7 @@ UNIQUENESS REQUIREMENT:
 - Use different contexts and real-world scenarios
 - Vary difficulty within ${tier} tier standards
 - DO NOT use common textbook examples (e.g., avoid 15% of 452 if asked before)
+- ONLY use GCSE style questions
 
 OUTPUT FORMAT - VALID JSON ONLY:
 {
@@ -173,12 +214,12 @@ OUTPUT FORMAT - VALID JSON ONLY:
 MARK SCHEME STRUCTURE:
 - First marks: method/formula (e.g., "Correct formula: A = πr²")
 - Middle marks: working shown (e.g., "Substitution: A = 3.14 × 5²")
-- Final mark: accurate answer with units (e.g., "Answer: 78.5 cm²")
+- Final mark: accurate answer with units (e.g., "Answer: 79cm² (rounded from 78.5 to nearest integer)")
 - TOTAL marks must equal ${marks}
 
 FINAL CHECK BEFORE RESPONDING:
 ✓ Have I used full precision in ALL calculations?
-✓ Did I only round the FINAL answer?
+✓ Did I only round the FINAL answer to the nearest whole number?
 ✓ Is my answer verified/checked?
 ✓ Are units included?
 ✓ Does mark scheme have exactly ${marks} mark points?
@@ -195,13 +236,51 @@ Generate the question now:`;
           messages: [{ role: "user", content: prompt }]
         })
       });
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} - ${response.statusText}`);
+      }
+      
       const data = await response.json();
+      
+      if (!data.content || !data.content[0] || !data.content[0].text) {
+        throw new Error('Invalid API response format - missing content');
+      }
+      
       const text = data.content[0].text;
       const clean = text.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
+      
+      // Validate parsed data
+      if (!parsed.question || !parsed.markscheme || !Array.isArray(parsed.markscheme)) {
+        throw new Error('Invalid question format - missing required fields');
+      }
+      
+      if (parsed.markscheme.length === 0) {
+        throw new Error('Mark scheme is empty');
+      }
+      
       setQuestion(parsed);
     } catch (err) {
-      setQuestion({ subject, topic, marks, question: "Error generating question. Please try again.", markscheme: [] });
+      console.error('⚠️ Question generation error:', err);
+      console.error('Error details:', {
+        subject,
+        topic,
+        tier,
+        examBoard,
+        marks,
+        timestamp: new Date().toISOString(),
+        errorMessage: err.message,
+        errorStack: err.stack
+      });
+      
+      setQuestion({ 
+        subject, 
+        topic, 
+        marks, 
+        question: "⚠️ Unable to generate question. This error has been logged. Please click 'Next question' to try again, or contact support@trypaperplus.org if this persists.", 
+        markscheme: ["Error occurred - please skip this question and try the next one"] 
+      });
     }
     setLoading(false);
   }
