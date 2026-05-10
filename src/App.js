@@ -193,6 +193,7 @@ FOR SCIENCES - FACTUAL ACCURACY REQUIRED:
 5. For equations: ensure balanced and accurate
 6.For any calculations round to the nearest integer
 7. State "Round your answer to the nearest integer." at the end of every calculation question
+8. Most questions must not be calculation questions (they must foucus on scientific knowledge rather than maths)
 `}
 
 UNIQUENESS REQUIREMENT:
