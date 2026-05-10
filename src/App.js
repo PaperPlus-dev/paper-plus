@@ -248,8 +248,18 @@ Generate the question now:`;
       }
       
       const text = data.content[0].text;
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
+
+// Remove markdown code blocks
+let clean = text.replace(/```json|```/g, "").trim();
+
+// Extract JSON from text (handles AI adding preambles)
+const jsonMatch = clean.match(/\{[\s\S]*\}/);
+if (!jsonMatch) {
+  throw new Error('No valid JSON found in AI response');
+}
+clean = jsonMatch[0];
+
+const parsed = JSON.parse(clean);
       
       // Validate parsed data
       if (!parsed.question || !parsed.markscheme || !Array.isArray(parsed.markscheme)) {
